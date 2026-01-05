@@ -40,7 +40,7 @@ class Diarizer:
             transcribed result through whisper.
         use_auth_token: str
             Huggingface token with READ permission. This is only needed the first time you download the model.
-            You must manually go to the website https://huggingface.co/pyannote/speaker-diarization-3.1 and agree to their TOS to download the model.
+            You must manually go to the website https://huggingface.co/pyannote/speaker-diarization-community-1 and agree to their TOS to download the model.
         device: Optional[str]
             Device for diarization.
 
@@ -59,7 +59,8 @@ class Diarizer:
         if device != self.device or self.pipe is None:
             self.update_pipe(
                 device=device,
-                use_auth_token=use_auth_token
+                use_auth_token=use_auth_token,
+                model_name="pyannote/speaker-diarization-community-1"
             )
 
         audio = load_audio(audio)
@@ -88,6 +89,7 @@ class Diarizer:
     def update_pipe(self,
                     use_auth_token: Optional[str] = None,
                     device: Optional[str] = None,
+                    model_name: Optional[str] = None,
                     ):
         """
         Set pipeline for diarization
@@ -96,13 +98,18 @@ class Diarizer:
         ----------
         use_auth_token: str
             Huggingface token with READ permission. This is only needed the first time you download the model.
-            You must manually go to the website https://huggingface.co/pyannote/speaker-diarization-3.1 and agree to their TOS to download the model.
+            You must manually go to the website https://huggingface.co/pyannote/speaker-diarization-community-1 and agree to their TOS to download the model.
         device: str
             Device for diarization.
+        model_name: str
+            Model name for diarization. Defaults to pyannote/speaker-diarization-community-1
         """
         if device is None:
             device = self.get_device()
         self.device = device
+
+        if model_name is None:
+            model_name = "pyannote/speaker-diarization-community-1"
 
         os.makedirs(self.model_dir, exist_ok=True)
 
@@ -110,7 +117,7 @@ class Diarizer:
                 not use_auth_token):
             print(
                 "\nFailed to diarize. You need huggingface token and agree to their requirements to download the diarization model.\n"
-                "Go to \"https://huggingface.co/pyannote/speaker-diarization-3.1\" and follow their instructions to download the model.\n"
+                "Go to \"https://huggingface.co/pyannote/speaker-diarization-community-1\" and follow their instructions to download the model.\n"
             )
             return
 
@@ -118,7 +125,8 @@ class Diarizer:
         # Disable redundant torchvision warning message
         logger.disabled = True
         self.pipe = DiarizationPipeline(
-            use_auth_token=use_auth_token,
+            model_name=model_name,
+            token=use_auth_token,  # Use 'token' parameter for pyannote.audio 4.x
             device=device,
             cache_dir=self.model_dir
         )

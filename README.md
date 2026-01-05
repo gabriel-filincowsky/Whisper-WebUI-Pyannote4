@@ -28,9 +28,9 @@ If you wish to try this on Colab, you can do it in [here](https://colab.research
   - Translate subtitle files using DeepL API
 - Pre-processing audio input with [Silero VAD](https://github.com/snakers4/silero-vad).
 - Pre-processing audio input to separate BGM with [UVR](https://github.com/Anjok07/ultimatevocalremovergui). 
-- Post-processing with speaker diarization using the [pyannote](https://huggingface.co/pyannote/speaker-diarization-3.1) model.
+- Post-processing with speaker diarization using the [pyannote](https://huggingface.co/pyannote/speaker-diarization-community-1) model.
    - To download the pyannote model, you need to have a Huggingface token and manually accept their terms in the pages below.
-      1. https://huggingface.co/pyannote/speaker-diarization-3.1
+      1. https://huggingface.co/pyannote/speaker-diarization-community-1
       2. https://huggingface.co/pyannote/segmentation-3.0
 
 ### Pipeline Diagram

@@ -15,18 +15,49 @@ from modules.diarize.audio_loader import load_audio, SAMPLE_RATE
 class DiarizationPipeline:
     def __init__(
         self,
-        model_name="pyannote/speaker-diarization-3.1",
+        model_name="pyannote/speaker-diarization-community-1",
         cache_dir: str = DIARIZATION_MODELS_DIR,
         use_auth_token=None,
+        token=None,
         device: Optional[Union[str, torch.device]] = "cpu",
     ):
+        """
+        Initialize diarization pipeline with pyannote.audio 4.x compatibility.
+        
+        Parameters
+        ----------
+        model_name : str
+            Hugging Face model identifier
+        cache_dir : str
+            Directory to cache models
+        use_auth_token : str, optional
+            Deprecated: Use 'token' instead. Kept for backward compatibility.
+        token : str, optional
+            Hugging Face authentication token (preferred for pyannote.audio 4.x)
+        device : str or torch.device
+            Device to run the pipeline on
+        """
         if isinstance(device, str):
             device = torch.device(device)
-        self.model = Pipeline.from_pretrained(
-            model_name,
-            use_auth_token=use_auth_token,
-            cache_dir=cache_dir
-        ).to(device)
+        
+        # pyannote.audio 4.x uses 'token' instead of 'use_auth_token'
+        # Support both for compatibility
+        auth_token = token if token is not None else use_auth_token
+        
+        # Try with 'token' first (pyannote.audio 4.x), fall back to 'use_auth_token' if needed
+        try:
+            self.model = Pipeline.from_pretrained(
+                model_name,
+                token=auth_token,
+                cache_dir=cache_dir
+            ).to(device)
+        except TypeError:
+            # Fallback for older API if needed
+            self.model = Pipeline.from_pretrained(
+                model_name,
+                use_auth_token=auth_token,
+                cache_dir=cache_dir
+            ).to(device)
 
     def __call__(self, audio: Union[str, np.ndarray], min_speakers=None, max_speakers=None):
         if isinstance(audio, str):
