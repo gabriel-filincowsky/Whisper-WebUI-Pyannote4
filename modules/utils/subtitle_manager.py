@@ -77,15 +77,30 @@ class ResultWriter:
         self, result: Union[dict, List[Segment]], output_file_name: str,
             options: Optional[dict] = None, **kwargs
     ):
+        # Import here to avoid circular imports
+        from modules.utils.vram_diagnostics import log_vram, log_vram_delta, get_vram_stats
+        
+        log_vram(f"WRITER.{self.extension.upper()}:start", f"file_name={output_file_name}")
+        pre_writer_stats = get_vram_stats()
+        
         if isinstance(result, List) and result and isinstance(result[0], Segment):
+            log_vram(f"WRITER.{self.extension.upper()}:converting_segments", f"segments_count={len(result)}")
+            pre_convert_stats = get_vram_stats()
             result = {"segments": [seg.model_dump() for seg in result]}
+            log_vram_delta(f"WRITER.{self.extension.upper()}:after_convert", pre_convert_stats, "Segments converted to dict")
 
         output_path = os.path.join(
             self.output_dir, output_file_name + "." + self.extension
         )
+        
+        log_vram(f"WRITER.{self.extension.upper()}:before_write", f"output_path={output_path}")
+        pre_write_stats = get_vram_stats()
 
         with open(output_path, "w", encoding="utf-8") as f:
             self.write_result(result, file=f, options=options, **kwargs)
+        
+        log_vram_delta(f"WRITER.{self.extension.upper()}:after_write", pre_write_stats, "File written")
+        log_vram_delta(f"WRITER.{self.extension.upper()}:end", pre_writer_stats, "Writer complete")
 
     def write_result(
         self, result: dict, file: TextIO, options: Optional[dict] = None, **kwargs
@@ -424,6 +439,12 @@ def generate_file(
     output_format: str, output_dir: str, result: Union[dict, List[Segment]], output_file_name: str,
     add_timestamp: bool = True, **kwargs
 ) -> Tuple[str, str]:
+    # Import here to avoid circular imports
+    from modules.utils.vram_diagnostics import log_vram, log_vram_delta, get_vram_stats
+    
+    log_vram("GENERATE_FILE:start", f"format={output_format}, file_name={output_file_name}")
+    pre_generate_stats = get_vram_stats()
+    
     output_format = output_format.strip().lower().replace(".", "")
     output_format = "vtt" if output_format == "webvtt" else output_format
 
@@ -432,13 +453,28 @@ def generate_file(
         output_file_name += f"-{timestamp}"
 
     file_path = os.path.join(output_dir, f"{output_file_name}.{output_format}")
+    log_vram("GENERATE_FILE:before_get_writer", f"file_path={file_path}")
+    
     file_writer = get_writer(output_format=output_format, output_dir=output_dir)
 
     if isinstance(file_writer, WriteLRC) and kwargs.get("highlight_words", False):
         kwargs["highlight_words"], kwargs["align_lrc_words"] = False, True
 
+    log_vram("GENERATE_FILE:before_file_writer_call", f"writer_type={type(file_writer).__name__}")
+    pre_writer_stats = get_vram_stats()
+    
     file_writer(result=result, output_file_name=output_file_name, **kwargs)
+    
+    log_vram_delta("GENERATE_FILE:after_file_writer_call", pre_writer_stats, "File written to disk")
+    
+    log_vram("GENERATE_FILE:before_read_file", f"Reading file: {file_path}")
+    pre_read_stats = get_vram_stats()
+    
     content = read_file(file_path)
+    
+    log_vram_delta("GENERATE_FILE:after_read_file", pre_read_stats, f"content_length={len(content)} chars")
+    log_vram_delta("GENERATE_FILE:end", pre_generate_stats, "File generation complete")
+    
     return content, file_path
 
 

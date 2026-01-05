@@ -24,6 +24,7 @@ from modules.utils.audio_manager import validate_audio
 from modules.whisper.data_classes import *
 from modules.diarize.diarizer import Diarizer
 from modules.vad.silero_vad import SileroVAD
+from modules.utils.vram_diagnostics import log_vram, log_vram_delta, get_vram_stats
 
 
 logger = get_logger()
@@ -146,7 +147,9 @@ class BaseTranscriptionPipeline(ABC):
                 self.music_separator.offload()
             elapsed_time_bgm_sep = time.time() - start_time
 
-        origin_audio = deepcopy(audio)
+        # Use reference instead of deepcopy to avoid unnecessary memory duplication
+        # Only copy if we need to modify audio without affecting original
+        origin_audio = audio.copy() if isinstance(audio, np.ndarray) else audio
 
         if vad_params.vad_filter:
             progress(0, desc="Filtering silent parts from audio..")
@@ -168,15 +171,27 @@ class BaseTranscriptionPipeline(ABC):
                 audio = vad_processed
             else:
                 vad_params.vad_filter = False
+            
+            # Clean up VAD processed audio if it's different from original
+            if vad_processed is not audio:
+                del vad_processed
 
+        log_vram("BASE_PIPELINE.run:before_transcribe", "Starting Whisper transcription")
+        pre_transcribe_stats = get_vram_stats()
+        
         result, elapsed_time_transcription = self.transcribe(
             audio,
             progress,
             progress_callback,
             *whisper_params.to_list()
         )
+        
+        log_vram_delta("BASE_PIPELINE.run:after_transcribe", pre_transcribe_stats, f"segments={len(result)}")
+        
         if whisper_params.enable_offload:
+            log_vram("BASE_PIPELINE.run:whisper_offload_start", "Offloading Whisper model")
             self.offload()
+            log_vram("BASE_PIPELINE.run:whisper_offload_done", "Whisper model offloaded")
 
         if vad_params.vad_filter:
             restored_result = self.vad.restore_speech_timestamps(
@@ -190,14 +205,40 @@ class BaseTranscriptionPipeline(ABC):
 
         if diarization_params.is_diarize:
             progress(0.99, desc="Diarizing speakers..")
+            log_vram("BASE_PIPELINE.run:before_diarization", "=== DIARIZATION PHASE START ===")
+            pre_diarization_stats = get_vram_stats()
+            
             result, elapsed_time_diarization = self.diarizer.run(
                 audio=origin_audio,
                 use_auth_token=diarization_params.hf_token if diarization_params.hf_token else os.environ.get("HF_TOKEN"),
                 transcribed_result=result,
-                device=diarization_params.diarization_device
+                device=diarization_params.diarization_device,
+                chunk_length=diarization_params.chunk_length,
+                overlap_length=diarization_params.overlap_length,
+                min_speakers=diarization_params.min_speakers,
+                max_speakers=diarization_params.max_speakers
             )
+            
+            log_vram_delta("BASE_PIPELINE.run:after_diarization", pre_diarization_stats, f"diarized_segments={len(result)}")
+            
+            # Always offload diarization model after use to free VRAM
+            # The enable_offload flag controls whether to keep it loaded for faster subsequent runs
             if diarization_params.enable_offload:
+                log_vram("BASE_PIPELINE.run:diarizer_offload_start", "Offloading diarization model")
                 self.diarizer.offload()
+                log_vram("BASE_PIPELINE.run:diarizer_offload_done", "Diarization model offloaded")
+            else:
+                # Even if offload is disabled, aggressively clean up GPU cache after diarization
+                # This helps prevent VRAM accumulation and memory surges
+                log_vram("BASE_PIPELINE.run:diarizer_cache_cleanup_start", "Offload disabled, cleaning cache only")
+                if self.device == "cuda":
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()  # Ensure all CUDA operations complete
+                    torch.cuda.empty_cache()  # Second pass to catch delayed releases
+                    torch.cuda.reset_max_memory_allocated()
+                log_vram("BASE_PIPELINE.run:diarizer_cache_cleanup_done", "Cache cleanup complete")
+            
+            log_vram_delta("BASE_PIPELINE.run:diarization_phase_end", pre_diarization_stats, "=== DIARIZATION PHASE END ===")
 
         self.cache_parameters(
             params=params,
@@ -208,6 +249,20 @@ class BaseTranscriptionPipeline(ABC):
         if not result:
             logger.info(f"Whisper did not detected any speech segments in the audio.")
             result = [Segment()]
+
+        log_vram("BASE_PIPELINE.run:final_cleanup_start", "Starting final cleanup")
+        pre_final_cleanup_stats = get_vram_stats()
+        
+        # Clean up audio data from memory after processing
+        del origin_audio
+        if isinstance(audio, np.ndarray):
+            del audio
+        # Final GPU cache cleanup
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
+
+        log_vram_delta("BASE_PIPELINE.run:final_cleanup_done", pre_final_cleanup_stats, "Final cleanup complete")
+        log_vram("BASE_PIPELINE.run:end", "=== PIPELINE COMPLETE ===")
 
         progress(1.0, desc="Finished.")
         total_elapsed_time = time.time() - start_time
@@ -270,6 +325,9 @@ class BaseTranscriptionPipeline(ABC):
 
             files_info = {}
             for file in files:
+                log_vram("TRANSCRIBE_FILE:before_run", f"file={os.path.basename(file)}")
+                pre_run_stats = get_vram_stats()
+                
                 transcribed_segments, time_for_task = self.run(
                     file,
                     progress,
@@ -278,8 +336,13 @@ class BaseTranscriptionPipeline(ABC):
                     None,
                     *pipeline_params,
                 )
+                
+                log_vram_delta("TRANSCRIBE_FILE:after_run", pre_run_stats, f"segments={len(transcribed_segments)}, time={time_for_task:.2f}s")
+                log_vram("TRANSCRIBE_FILE:before_file_generation", "Starting file generation")
 
                 file_name, file_ext = os.path.splitext(os.path.basename(file))
+                pre_generate_stats = get_vram_stats()
+                
                 if save_same_dir and input_folder_path:
                     output_dir = os.path.dirname(file)
                     subtitle, file_path = generate_file(
@@ -290,7 +353,9 @@ class BaseTranscriptionPipeline(ABC):
                         add_timestamp=add_timestamp,
                         **writer_options
                     )
+                    log_vram_delta("TRANSCRIBE_FILE:after_generate_same_dir", pre_generate_stats, f"file_path={file_path}")
 
+                pre_generate_main_stats = get_vram_stats()
                 subtitle, file_path = generate_file(
                     output_dir=self.output_dir,
                     output_file_name=file_name,
@@ -299,8 +364,19 @@ class BaseTranscriptionPipeline(ABC):
                     add_timestamp=add_timestamp,
                     **writer_options
                 )
-                files_info[file_name] = {"subtitle": read_file(file_path), "time_for_task": time_for_task, "path": file_path}
+                log_vram_delta("TRANSCRIBE_FILE:after_generate_main", pre_generate_main_stats, f"file_path={file_path}")
+                
+                log_vram("TRANSCRIBE_FILE:before_read_file", f"Reading file content: {file_path}")
+                pre_read_stats = get_vram_stats()
+                file_content = read_file(file_path)
+                log_vram_delta("TRANSCRIBE_FILE:after_read_file", pre_read_stats, f"content_length={len(file_content)} chars")
+                
+                files_info[file_name] = {"subtitle": file_content, "time_for_task": time_for_task, "path": file_path}
+                log_vram("TRANSCRIBE_FILE:file_info_stored", f"Stored info for {file_name}")
 
+            log_vram("TRANSCRIBE_FILE:before_result_formatting", f"Formatting results for {len(files_info)} files")
+            pre_format_stats = get_vram_stats()
+            
             total_result = ''
             total_time = 0
             for file_name, info in files_info.items():
@@ -308,9 +384,15 @@ class BaseTranscriptionPipeline(ABC):
                 total_result += f'{file_name}\n\n'
                 total_result += f'{info["subtitle"]}'
                 total_time += info["time_for_task"]
-
+            
+            log_vram_delta("TRANSCRIBE_FILE:after_result_formatting", pre_format_stats, f"total_result_length={len(total_result)} chars")
+            
+            log_vram("TRANSCRIBE_FILE:before_final_string", "Creating final result string")
+            pre_final_stats = get_vram_stats()
             result_str = f"Done in {self.format_time(total_time)}! Subtitle is in the outputs folder.\n\n{total_result}"
             result_file_path = [info['path'] for info in files_info.values()]
+            log_vram_delta("TRANSCRIBE_FILE:after_final_string", pre_final_stats, f"result_str_length={len(result_str)} chars, file_paths={len(result_file_path)}")
+            log_vram("TRANSCRIBE_FILE:returning", "=== RETURNING TO GRADIO ===")
 
             return result_str, result_file_path
 
@@ -467,11 +549,22 @@ class BaseTranscriptionPipeline(ABC):
     def offload(self):
         """Offload the model and free up the memory"""
         if self.model is not None:
+            # Move model to CPU before deletion to ensure proper cleanup
+            try:
+                if hasattr(self.model, 'to'):
+                    self.model = self.model.cpu()
+                elif hasattr(self.model, 'model') and hasattr(self.model.model, 'to'):
+                    # For faster-whisper models wrapped in WhisperModel
+                    self.model.model = self.model.model.cpu()
+            except Exception:
+                pass  # If moving fails, continue with deletion
             del self.model
             self.model = None
         if self.device == "cuda":
             torch.cuda.empty_cache()
             torch.cuda.reset_max_memory_allocated()
+            # Force synchronization to ensure cleanup completes
+            torch.cuda.synchronize()
         if self.device == "xpu":
             torch.xpu.empty_cache()
             torch.xpu.reset_accumulated_memory_stats()

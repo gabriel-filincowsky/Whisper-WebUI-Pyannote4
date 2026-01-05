@@ -143,11 +143,23 @@ class TranslationBase(ABC):
     def offload(self):
         """Offload the model and free up the memory"""
         if self.model is not None:
+            # Move model to CPU before deletion to ensure proper cleanup
+            try:
+                if hasattr(self.model, 'to'):
+                    self.model = self.model.cpu()
+            except Exception:
+                pass  # If moving fails, continue with deletion
             del self.model
             self.model = None
+        # Clean up pipeline if it exists (for NLLB)
+        if hasattr(self, 'pipeline') and self.pipeline is not None:
+            del self.pipeline
+            self.pipeline = None
         if self.device == "cuda":
             torch.cuda.empty_cache()
             torch.cuda.reset_max_memory_allocated()
+            # Force synchronization to ensure cleanup completes
+            torch.cuda.synchronize()
         if self.device == "xpu":
             torch.xpu.empty_cache()
             torch.xpu.reset_accumulated_memory_stats()

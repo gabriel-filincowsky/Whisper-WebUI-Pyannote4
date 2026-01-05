@@ -20,6 +20,7 @@ class NLLBInference(TranslationBase):
         self.available_source_langs = list(NLLB_AVAILABLE_LANGS.keys())
         self.available_target_langs = list(NLLB_AVAILABLE_LANGS.keys())
         self.pipeline = None
+        self.device = self.get_device()
 
     def translate(self,
                   text: str,
@@ -59,6 +60,10 @@ class NLLBInference(TranslationBase):
                                                            cache_dir=os.path.join(self.model_dir, "tokenizers"),
                                                            local_files_only=local_files_only)
 
+        # Move model to device if not already there
+        if self.model is not None and hasattr(self.model, 'to'):
+            self.model = self.model.to(self.device)
+        
         self.pipeline = pipeline("translation",
                                  model=self.model,
                                  tokenizer=self.tokenizer,

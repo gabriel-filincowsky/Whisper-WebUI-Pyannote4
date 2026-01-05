@@ -211,6 +211,24 @@ class SileroVAD:
 
     def update_model(self):
         self.model = get_vad_model()
+    
+    def offload(self):
+        """Offload the VAD model and free up the memory"""
+        if self.model is not None:
+            # Move model to CPU before deletion to ensure proper cleanup
+            try:
+                if hasattr(self.model, 'to'):
+                    self.model = self.model.cpu()
+            except Exception:
+                pass  # If moving fails, continue with deletion
+            del self.model
+            self.model = None
+        # VAD model is typically small and CPU-based, but clear cache anyway
+        import torch
+        import gc
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
 
     @staticmethod
     def collect_chunks(audio: np.ndarray, chunks: List[dict]) -> np.ndarray:

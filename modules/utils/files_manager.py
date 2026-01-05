@@ -98,6 +98,15 @@ def is_video(file_path):
 
 
 def read_file(file_path):
+    # Import here to avoid circular imports
+    from modules.utils.vram_diagnostics import log_vram, log_vram_delta, get_vram_stats
+    
+    log_vram("READ_FILE:start", f"file_path={file_path}")
+    pre_read_stats = get_vram_stats()
+    
     with open(file_path, "r", encoding="utf-8") as f:
         subtitle_content = f.read()
+    
+    log_vram_delta("READ_FILE:end", pre_read_stats, f"content_length={len(subtitle_content)} chars")
+    
     return subtitle_content

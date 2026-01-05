@@ -5,9 +5,13 @@ services:
     image: gabriel-filincowsky/whisper-webui-pyannote4:latest
 
     volumes:
-      # You can mount the container's volume paths to directory paths on your local machine.
-      # Models will be stored in the `./models' directory on your machine.
-      # Similarly, all output files will be stored in the `./outputs` directory.
+      # Mount source code for rapid development iteration (changes reflect immediately without rebuild)
+      # This overlays the code copied during build, allowing live code editing
+      - .:/Whisper-WebUI
+      # Use named volume for venv to prevent local venv directory from overlaying the restored venv
+      # This volume persists across restarts and takes precedence over the source code mount
+      - whisper-webui-venv:/Whisper-WebUI/venv
+      # Data directories
       - ./models:/Whisper-WebUI/models
       - ./outputs:/Whisper-WebUI/outputs
       - ./configs:/Whisper-WebUI/configs
@@ -18,7 +22,10 @@ services:
     stdin_open: true
     tty: true
 
-    entrypoint: ["python", "app.py", "--server_port", "7860", "--server_name", "0.0.0.0",]
+    # Use entrypoint script that preserves venv from image backup location
+    # The script will restore venv if needed, then execute the app command
+    # Use venv's Python explicitly to ensure correct interpreter
+    entrypoint: ["/Whisper-WebUI/docker-entrypoint.sh", "/Whisper-WebUI/venv/bin/python", "app.py", "--server_port", "7860", "--server_name", "0.0.0.0"]
 
     # If you're not using nvidia GPU, Update device to match yours.
     # See more info at : https://docs.docker.com/compose/compose-file/deploy/#driver
@@ -30,3 +37,8 @@ services:
             - driver: nvidia
               count: all
               capabilities: [ gpu ]
+
+volumes:
+  # Named volume to persist the venv across container restarts
+  # On first run, entrypoint script will populate it from /venv-backup
+  whisper-webui-venv:

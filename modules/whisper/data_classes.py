@@ -164,6 +164,30 @@ class DiarizationParams(BaseParams):
         default=True,
         description="Offload Diarization model after Speaker diarization"
     )
+    chunk_length: float = Field(
+        default=12.0,
+        ge=2.0,
+        le=60.0,
+        description="Chunk length in seconds for diarization processing. Avoid values between 6-10 seconds as they trigger excessive memory usage."
+    )
+    overlap_length: float = Field(
+        default=6.0,
+        ge=0.0,
+        le=30.0,
+        description="Overlap length in seconds between chunks. Should be less than chunk_length."
+    )
+    min_speakers: int = Field(
+        default=1,
+        ge=1,
+        le=20,
+        description="Minimum number of speakers to detect"
+    )
+    max_speakers: int = Field(
+        default=4,
+        ge=1,
+        le=20,
+        description="Maximum number of speakers to detect"
+    )
 
     @classmethod
     def to_gradio_inputs(cls,
@@ -188,7 +212,41 @@ class DiarizationParams(BaseParams):
             gr.Checkbox(
                 label=_("Offload sub model when finished"),
                 value=defaults.get("enable_offload", cls.__fields__["enable_offload"].default),
-            )
+            ),
+            gr.Number(
+                label=_("Chunk Length (seconds)"),
+                value=defaults.get("chunk_length", cls.__fields__["chunk_length"].default),
+                minimum=2.0,
+                maximum=60.0,
+                step=0.5,
+                info=_("⚠️ WARNING: Avoid values between 6-10 seconds as they trigger excessive memory usage (9+ GB). Recommended: 12 seconds or less than 5 seconds.")
+            ),
+            gr.Number(
+                label=_("Overlap Length (seconds)"),
+                value=defaults.get("overlap_length", cls.__fields__["overlap_length"].default),
+                minimum=0.0,
+                maximum=30.0,
+                step=0.5,
+                info=_("Overlap between chunks. Should be less than chunk length. Recommended: 50% of chunk length.")
+            ),
+            gr.Number(
+                label=_("Minimum Speakers"),
+                value=defaults.get("min_speakers", cls.__fields__["min_speakers"].default),
+                minimum=1,
+                maximum=20,
+                step=1,
+                precision=0,
+                info=_("Minimum number of speakers to detect")
+            ),
+            gr.Number(
+                label=_("Maximum Speakers"),
+                value=defaults.get("max_speakers", cls.__fields__["max_speakers"].default),
+                minimum=1,
+                maximum=20,
+                step=1,
+                precision=0,
+                info=_("Maximum number of speakers to detect")
+            ),
         ]
 
 
