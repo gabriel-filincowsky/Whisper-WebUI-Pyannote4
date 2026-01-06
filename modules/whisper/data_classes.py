@@ -166,14 +166,14 @@ class DiarizationParams(BaseParams):
     )
     chunk_length: float = Field(
         default=12.0,
-        ge=2.0,
-        le=60.0,
+        ge=0.5,
+        le=300.0,
         description="Chunk length in seconds for diarization processing. Avoid values between 6-10 seconds as they trigger excessive memory usage."
     )
     overlap_length: float = Field(
         default=6.0,
         ge=0.0,
-        le=30.0,
+        le=60.0,
         description="Overlap length in seconds between chunks. Should be less than chunk_length."
     )
     min_speakers: int = Field(
@@ -216,17 +216,19 @@ class DiarizationParams(BaseParams):
             gr.Number(
                 label=_("Chunk Length (seconds)"),
                 value=defaults.get("chunk_length", cls.__fields__["chunk_length"].default),
-                minimum=2.0,
-                maximum=60.0,
-                step=0.5,
+                minimum=0.5,
+                maximum=300.0,
+                step=0.1,
+                precision=1,
                 info=_("⚠️ WARNING: Avoid values between 6-10 seconds as they trigger excessive memory usage (9+ GB). Recommended: 12 seconds or less than 5 seconds.")
             ),
             gr.Number(
                 label=_("Overlap Length (seconds)"),
                 value=defaults.get("overlap_length", cls.__fields__["overlap_length"].default),
                 minimum=0.0,
-                maximum=30.0,
-                step=0.5,
+                maximum=60.0,
+                step=0.1,
+                precision=1,
                 info=_("Overlap between chunks. Should be less than chunk length. Recommended: 50% of chunk length.")
             ),
             gr.Number(
